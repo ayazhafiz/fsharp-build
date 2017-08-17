@@ -1,6 +1,6 @@
 #!/bin/sh
 
-if [ -f "$1"/*.sln ] || [ -f "$1"/app.fsx ] || [ -f "$1"/build.fsx ]; then
+if [ -f "$1"/*.sln ] || [ -f "$1"/src/app.fsx ] || [ -f "$1"/build.fsx ]; then
     echo "F#"
     exit 0
 else
