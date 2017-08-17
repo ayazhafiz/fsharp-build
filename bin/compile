@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# bin/compile <build-dir> <cache-dir>
+
+BUILD_DIR=$1
+CACHE_DIR=$2
+LP_DIR=$(cd "$(dirname "$0")"; cd ..; pwd)
+
+set -e
+
+MONO3_VM_BINARY="https://github.com/SuaveIO/mono-builder/releases/download/0.0.9/mono-4.4.2.11.tar.gz"
+NUGET_BINARY="https://dist.nuget.org/win-x86-commandline/latest/nuget.exe"
+PAKET_BINARY="https://github.com/fsprojects/Paket/releases/download/5.85.3/paket.exe"
+
+NUGET="${BUILD_DIR}/vendor/mono/bin/nuget.exe"
+XBUILD="${BUILD_DIR}/vendor/mono/lib/mono/4.5/xbuild.exe"
+
+echo "-----> Starting..."
+echo "-----> Downloading mono to ${CACHE_DIR}/$STACK/vendor"
+if [ ! -d "${CACHE_DIR}"/"$STACK"/vendor/mono ]; then
+    mkdir -p "${CACHE_DIR}"/"$STACK"/vendor
+    curl -L $MONO3_VM_BINARY -s | tar zxf - -C "${CACHE_DIR}"/"$STACK"/vendor
+    curl $NUGET_BINARY -L -o "${CACHE_DIR}/$STACK/vendor/mono/bin/nuget.exe"
+    curl $PAKET_BINARY -L -o "${CACHE_DIR}/$STACK/vendor/mono/bin/paket.exe"
+fi
+
+mkdir -p "${BUILD_DIR}"/vendor
+
+echo "-----> Copying ${CACHE_DIR}/$STACK/vendor/mono to ${BUILD_DIR}/vendor"
+cp -pr "${CACHE_DIR}/$STACK/vendor/mono" "${BUILD_DIR}/vendor/"
+
+rm -fr /app/vendor/mono
+
+echo "-----> Linking ${BUILD_DIR}/vendor/mono --> /app"
+ln -s "${BUILD_DIR}/vendor/mono" /app
+
+cp -p /app/mono/bin/fsharpc /app/mono/bin/fsharpc-heroku
+cp -p /app/mono/bin/fsharpi /app/mono/bin/fsharpi-heroku
+
+echo "-----> Setting envvars"
+export PATH="/app/mono/bin:$PATH"
+export LD_LIBRARY_PATH="/app/mono/lib:$LD_LIBRARY_PATH"
+echo "-----> Importing trusted root certificates"
+cert-sync --quiet --user /etc/ssl/certs/ca-certificates.crt
+
+cd "${BUILD_DIR}"
+
+if [ -f paket.lock ]; then
+  echo "-----> paket.lock found, restoring packages with paket"
+  mono /app/mono/bin/paket.exe restore
+elif [ -f paket.dependencies ]; then
+  echo "-----> paket.dependencies found, installing packages with paket"
+  mono /app/mono/bin/paket.exe install
+fi
+
+PKGS=$(shopt -s nullglob dotglob; echo ./*/packages.config)
+if [ -f packages.config ] || [ -f ${#PKGS} ]; then
+   echo "-----> packages.config found, installing dependencies with nuget"
+   find . -name packages.config | xargs -0 mono "$NUGET" install -o packages
+fi
+
+PKGS=$(shopt -s nullglob dotglob; echo ./*.sln)
+if [ -f app.fsx ]; then
+  echo "-----> Compiling app.fsx"
+  mono /app/mono/lib/mono/4.5/fsc.exe app.fsx
+elif [ -f ${#PKGS} ]; then
+   echo "-----> Compiling application"
+   mono "$XBUILD"
+elif [ -f "$1"/build.fsx ]; then
+   echo "-----> Compiling fake project"
+   mono packages/FAKE/tools/FAKE.exe --fsiargs -d:MONO build.fsx
+fi
+
+mkdir -p "${BUILD_DIR}"/.profile.d
+cp -n "${LP_DIR}"/.profile.d/* "${BUILD_DIR}"/.profile.d/

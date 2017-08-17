@@ -1,0 +1,8 @@
+#!/bin/sh
+
+if [ -f "$1"/*.sln ] || [ -f "$1"/app.fsx ] || [ -f "$1"/build.fsx ]; then
+    echo "SuaveFramework"
+    exit 0
+else
+    exit 1
+fi
